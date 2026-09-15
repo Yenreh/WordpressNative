@@ -13,6 +13,11 @@
 #   reload        Validate nginx and reload nginx + PHP-FPM (root)
 #   ssl-renew     Regenerate the self-signed certificate (root)
 #   db-dump [f]   Dump the database to backups/ (or to the given file)
+#   db-import <f> Restore a .sql or .sql.gz dump (replaces the current content),
+#                 then run change-url
+#   change-url [old] [new]
+#                 Rewrite every occurrence of a URL in the database
+#                 (default: current home -> https://SITE_DOMAIN)
 #   wp <args>     Run WP-CLI against this site, e.g. `console wp plugin list`
 # =============================================================================
 set -euo pipefail
@@ -200,6 +205,45 @@ cmd_db_dump() {
     warn "The dump contains site data. Keep it out of the repository (backups/ is gitignored)."
 }
 
+cmd_db_import() {
+    local file="${1:-}"
+    [ -n "$file" ] || die "Usage: console db-import <file.sql|file.sql.gz>"
+    [ -f "$file" ] || die "Dump not found: ${file}"
+
+    warn "This replaces the content of ${DB_NAME} at ${DB_HOST}:${DB_PORT} with ${file}."
+    confirm "Continue?" || die "Aborted."
+
+    step "Importing ${file}"
+    case "$file" in
+        *.gz) gzip -dc "$file" | db_as_user "$(db_client)" --default-character-set=utf8mb4 "$DB_NAME" ;;
+        *)    db_as_user "$(db_client)" --default-character-set=utf8mb4 "$DB_NAME" < "$file" ;;
+    esac
+    ok "Database imported"
+
+    cmd_change_url
+}
+
+cmd_change_url() {
+    local old="${1:-}" new="${2:-$SITE_URL}"
+    [ -n "$old" ] || old="$(cmd_wp option get home)"
+    [ -n "$old" ] || die "Cannot read the current home URL from the database."
+    old="${old%/}"; new="${new%/}"
+
+    if [ "$old" = "$new" ]; then
+        ok "URL already ${new}; nothing to do"
+        return 0
+    fi
+
+    step "Rewriting ${old} -> ${new}"
+    # search-replace handles serialized values; guid is left alone on purpose
+    # (WordPress treats it as an identifier, not as a link).
+    cmd_wp search-replace "$old" "$new" \
+        --all-tables-with-prefix --skip-columns=guid --report-changed-only
+    cmd_wp cache flush >/dev/null 2>&1 || true
+    cmd_wp rewrite flush --hard >/dev/null 2>&1 || true
+    ok "Site URL is now ${new}"
+}
+
 cmd_wp() {
     [ $# -gt 0 ] || die "Usage: console wp <wp-cli arguments>"
     wp "$@" --path="$WP_PATH" --allow-root
@@ -214,6 +258,8 @@ case "$COMMAND" in
     reload)      cmd_reload ;;
     ssl-renew)   cmd_ssl_renew ;;
     db-dump)     cmd_db_dump "${ARGS[@]:-}" ;;
+    db-import)   cmd_db_import "${ARGS[@]:-}" ;;
+    change-url)  cmd_change_url "${ARGS[@]+"${ARGS[@]}"}" ;;
     wp)          cmd_wp "${ARGS[@]}" ;;
     *)           err "Unknown command: ${COMMAND}"; echo ""; usage; exit 1 ;;
 esac
