@@ -177,6 +177,8 @@ sudo $C nginx            # re-render and install the nginx site config
 sudo $C reload           # nginx -t, then reload nginx + PHP-FPM
 sudo $C ssl-renew        # regenerate the self-signed certificate
 $C db-dump [file]        # dump the database into backups/ (gitignored)
+$C db-import <file>      # restore a .sql/.sql.gz dump, then change-url
+$C change-url [old] [new] # rewrite a URL everywhere (default: home -> https://SITE_DOMAIN)
 $C wp <args>             # any WP-CLI command against this site
 ```
 
@@ -202,6 +204,8 @@ $D wp <args>          # WP-CLI in a throwaway container
 $D shell [service]    # shell in a container (default: wordpress)
 $D url                # print the local URL (works without Docker)
 $D db-dump [file]     # dump the database into backups/
+$D db-import <file>   # restore a .sql/.sql.gz dump, then change-url
+$D change-url [old] [new] # rewrite a URL everywhere (default: home -> DEV_URL)
 $D stop | restart     # stop / restart, keep everything
 $D down               # remove container + network (volume preserved)
 $D down --volumes     # also delete the WordPress files volume
